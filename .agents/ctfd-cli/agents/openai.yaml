@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTFd CLI"
+  short_description: "Run the CTFd participant CLI through uvx"
+  default_prompt: "Use $ctfd-cli to inspect challenges on my configured CTFd instance."
