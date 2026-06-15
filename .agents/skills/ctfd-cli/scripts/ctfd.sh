@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly default_source='git+https://github.com/p1atdev/ctfd-cli.git'
-readonly source_spec="${CTFD_CLI_SOURCE:-$default_source}"
+readonly script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! command -v uvx >/dev/null 2>&1; then
-    printf '%s\n' 'Error: uvx is required. Install uv before using this skill.' >&2
+if ! command -v uv >/dev/null 2>&1; then
+    printf '%s\n' 'Error: uv is required. Install uv before using this skill.' >&2
     exit 127
 fi
 
-exec uvx --from "$source_spec" ctfd "$@"
+exec uv run --script "$script_dir/run_ctfd.py" "$@"

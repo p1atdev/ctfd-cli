@@ -1,23 +1,17 @@
 ---
 name: ctfd-cli
-description: Run the participant-facing CTFd CLI directly from its Git repository with uvx. Use when an agent needs to list or inspect CTFd challenges, view hints or the scoreboard, inspect the current user's solves and submissions, submit a flag, or unlock a hint without installing the ctfd package globally.
+description: Run the bundled participant-facing CTFd CLI with uv. Use when an agent needs to list or inspect CTFd challenges, view hints or the scoreboard, inspect the current user's solves and submissions, submit a flag, or unlock a hint without installing the ctfd package globally or cloning its repository.
 ---
 
 # CTFd CLI
 
 Keep the shell in the directory that contains the target CTF's `.env`. Resolve this
 skill's directory to an absolute path and invoke its `scripts/ctfd.sh`; do not change
-into the skill directory. The wrapper invokes:
+into the skill directory. The wrapper runs the Python package bundled under `scripts/`
+with the dependencies declared in `scripts/run_ctfd.py`:
 
 ```console
-uvx --from git+https://github.com/p1atdev/ctfd-cli.git ctfd ...
-```
-
-Override the source when a branch, tag, commit, fork, or local checkout is required:
-
-```console
-CTFD_CLI_SOURCE='git+https://github.com/p1atdev/ctfd-cli.git@main' /path/to/skill/scripts/ctfd.sh --help
-CTFD_CLI_SOURCE='/path/to/ctfd-cli' /path/to/skill/scripts/ctfd.sh --help
+uv run --script /path/to/skill/scripts/run_ctfd.py ...
 ```
 
 ## Configure Access
