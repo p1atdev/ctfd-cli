@@ -24,7 +24,15 @@ from ctfd.errors import (
     CtfdPermissionError,
     CtfdRateLimitError,
 )
-from ctfd.models import ChallengeDetail, Hint, Submission, User
+from ctfd.models import (
+    AttemptResult,
+    ChallengeDetail,
+    ChallengeSummary,
+    Hint,
+    ScoreboardEntry,
+    Submission,
+    User,
+)
 
 EXIT_OPERATION = 1
 EXIT_CONFIG = 3
@@ -51,6 +59,7 @@ class CliOptions:
     url: str | None
     token: str | None
     timeout: float | None
+    short: bool
 
 
 def _handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
@@ -86,7 +95,7 @@ def _print_error(error: object) -> None:
 
 
 def _client(ctx: typer.Context) -> CtfdClient:
-    options = ctx.ensure_object(CliOptions)
+    options = _options(ctx)
     settings = load_settings(
         url=options.url,
         token=options.token,
@@ -97,6 +106,14 @@ def _client(ctx: typer.Context) -> CtfdClient:
         settings.token,
         timeout=settings.timeout,
     )
+
+
+def _options(ctx: typer.Context) -> CliOptions:
+    return ctx.find_root().ensure_object(CliOptions)
+
+
+def _short_mode(ctx: typer.Context) -> bool:
+    return _options(ctx).short
 
 
 def _json_data(value: BaseModel | Sequence[BaseModel] | dict[str, Any]) -> Any:
@@ -114,6 +131,106 @@ def _print_json(value: BaseModel | Sequence[BaseModel] | dict[str, Any]) -> None
     typer.echo(json.dumps(_json_data(value), ensure_ascii=False, indent=2))
 
 
+def _inline(value: object) -> str:
+    return " ".join(str(value).split())
+
+
+def _short_line(*parts: object | None) -> str:
+    return " | ".join(_inline(part) for part in parts if part is not None and part != "")
+
+
+def _short_row(*cells: object | None) -> str:
+    return " | ".join(
+        _inline(cell) if cell is not None and cell != "" else "-" for cell in cells
+    )
+
+
+def _print_short_challenges(challenges: list[ChallengeSummary]) -> None:
+    typer.echo(_short_row("ID", "NAME", "CATEGORY", "POINTS", "SOLVES", "STATUS"))
+    for challenge in challenges:
+        typer.echo(
+            _short_row(
+                challenge.id,
+                challenge.name,
+                challenge.category,
+                challenge.value,
+                challenge.solves,
+                "solved" if challenge.solved_by_me else "unsolved",
+            )
+        )
+
+
+def _print_short_challenge(challenge: ChallengeDetail) -> None:
+    typer.echo(_short_row("ID", "NAME", "CATEGORY", "POINTS", "SOLVES", "STATUS"))
+    typer.echo(
+        _short_row(
+            challenge.id,
+            challenge.name,
+            challenge.category,
+            challenge.value,
+            challenge.solves,
+            "solved" if challenge.solved_by_me else "unsolved",
+        )
+    )
+    if challenge.description:
+        typer.echo(f"description: {_inline(challenge.description)}")
+    if challenge.connection_info:
+        typer.echo(f"connection: {_inline(challenge.connection_info)}")
+    if challenge.max_attempts:
+        typer.echo(f"attempts: {challenge.attempts or 0}/{challenge.max_attempts}")
+    for file_url in challenge.files:
+        typer.echo(f"file: {file_url}")
+    for hint in challenge.hints:
+        cost = f"{hint.cost} pts" if hint.cost else "free"
+        state = _inline(hint.content) if hint.content else "locked"
+        typer.echo(_short_line(f"hint {hint.id}", hint.title, cost, state))
+
+
+def _print_short_attempt(result: AttemptResult) -> None:
+    typer.echo(_short_line(result.status, result.message))
+
+
+def _print_short_hint(hint: Hint) -> None:
+    cost = f"{hint.cost} pts" if hint.cost else "free"
+    typer.echo(_short_line(f"hint {hint.id}", hint.title, cost))
+    if hint.content:
+        typer.echo(_inline(hint.content))
+
+
+def _print_short_scoreboard(entries: list[ScoreboardEntry]) -> None:
+    typer.echo(_short_row("PLACE", "NAME", "SCORE"))
+    for entry in entries:
+        typer.echo(_short_row(entry.pos, entry.name, entry.score))
+
+
+def _print_short_user(user: User) -> None:
+    typer.echo(_short_row("NAME", "SCORE", "PLACE"))
+    typer.echo(_short_row(user.name, user.score, user.place))
+
+
+def _submission_challenge_name(submission: Submission) -> str | None:
+    if isinstance(submission.challenge, ChallengeSummary):
+        return submission.challenge.name
+    if isinstance(submission.challenge, dict):
+        name = submission.challenge.get("name")
+        return str(name) if name is not None else None
+    return None
+
+
+def _print_short_submissions(submissions: list[Submission]) -> None:
+    typer.echo(_short_row("CHALLENGE", "NAME", "RESULT", "PROVIDED", "DATE"))
+    for submission in submissions:
+        typer.echo(
+            _short_row(
+                submission.challenge_id,
+                _submission_challenge_name(submission),
+                submission.type,
+                submission.provided,
+                submission.date,
+            )
+        )
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -129,10 +246,17 @@ def main(
         float | None,
         typer.Option("--timeout", min=0.1, help="Request timeout in seconds."),
     ] = None,
+    short: Annotated[
+        bool,
+        typer.Option(
+            "--short",
+            help="Output only essential information as concise plain text.",
+        ),
+    ] = False,
 ) -> None:
     """Load global connection options."""
 
-    ctx.obj = CliOptions(url=url, token=token, timeout=timeout)
+    ctx.obj = CliOptions(url=url, token=token, timeout=timeout, short=short)
 
 
 @challenges_app.command("list")
@@ -163,6 +287,9 @@ def list_challenges(
             field=field,
         )
 
+    if _short_mode(ctx):
+        _print_short_challenges(challenges)
+        return
     if json_output:
         _print_json(challenges)
         return
@@ -198,6 +325,9 @@ def show_challenge(
     with _client(ctx) as client:
         challenge = client.get_challenge(challenge_id)
 
+    if _short_mode(ctx):
+        _print_short_challenge(challenge)
+        return
     if json_output:
         _print_json(challenge)
         return
@@ -244,7 +374,9 @@ def submit_challenge(
     with _client(ctx) as client:
         result = client.submit_challenge(challenge_id, flag)
 
-    if json_output:
+    if _short_mode(ctx):
+        _print_short_attempt(result)
+    elif json_output:
         _print_json(result)
     else:
         style = "bold green" if result.status == "correct" else "bold yellow"
@@ -275,7 +407,9 @@ def unlock_hint(
                     raise typer.Abort()
             hint = client.unlock_hint(hint_id)
 
-    if json_output:
+    if _short_mode(ctx):
+        _print_short_hint(hint)
+    elif json_output:
         _print_json(hint)
     else:
         _print_hint(hint)
@@ -300,6 +434,9 @@ def scoreboard(
     with _client(ctx) as client:
         entries = client.get_scoreboard()
 
+    if _short_mode(ctx):
+        _print_short_scoreboard(entries)
+        return
     if json_output:
         _print_json(entries)
         return
@@ -318,6 +455,10 @@ def scoreboard(
 def me(
     ctx: typer.Context,
     json_output: Annotated[bool, typer.Option("--json", help="Output JSON.")] = False,
+    hide_email: Annotated[
+        bool,
+        typer.Option("--hide-email", help="Hide the email address from output."),
+    ] = False,
 ) -> None:
     """Show the current user's profile."""
 
@@ -325,19 +466,24 @@ def me(
         return
     with _client(ctx) as client:
         user = client.get_me()
-    if json_output:
-        _print_json(user)
+    if _short_mode(ctx):
+        _print_short_user(user)
+    elif json_output:
+        if hide_email:
+            _print_json(user.model_dump(mode="json", exclude={"email"}))
+        else:
+            _print_json(user)
     else:
-        _print_user(user)
+        _print_user(user, hide_email=hide_email)
 
 
-def _print_user(user: User) -> None:
+def _print_user(user: User, *, hide_email: bool = False) -> None:
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("ID", str(user.id))
     table.add_row("Name", user.name)
-    if user.email:
+    if user.email and not hide_email:
         table.add_row("Email", user.email)
     table.add_row("Score", str(user.score))
     if user.place is not None:
@@ -359,7 +505,12 @@ def my_solves(
 
     with _client(ctx) as client:
         submissions = client.get_my_solves()
-    _print_submissions(submissions, json_output=json_output, title="Solves")
+    _print_submissions(
+        submissions,
+        short_output=_short_mode(ctx),
+        json_output=json_output,
+        title="Solves",
+    )
 
 
 @me_app.command("submissions")
@@ -376,15 +527,24 @@ def my_submissions(
 
     with _client(ctx) as client:
         submissions = client.get_my_submissions(challenge_id=challenge_id)
-    _print_submissions(submissions, json_output=json_output, title="Submissions")
+    _print_submissions(
+        submissions,
+        short_output=_short_mode(ctx),
+        json_output=json_output,
+        title="Submissions",
+    )
 
 
 def _print_submissions(
     submissions: list[Submission],
     *,
+    short_output: bool,
     json_output: bool,
     title: str,
 ) -> None:
+    if short_output:
+        _print_short_submissions(submissions)
+        return
     if json_output:
         _print_json(submissions)
         return

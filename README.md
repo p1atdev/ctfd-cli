@@ -44,6 +44,7 @@ uv run ctfd challenges unlock-hint 4
 # スコアボードと自分の情報
 uv run ctfd scoreboard
 uv run ctfd me
+uv run ctfd me --hide-email
 uv run ctfd me solves
 uv run ctfd me submissions --challenge-id 12
 ```
@@ -53,6 +54,16 @@ uv run ctfd me submissions --challenge-id 12
 ```console
 uv run ctfd challenges list --json
 uv run ctfd challenges show 12 --json
+```
+
+AI エージェントから利用する場合は、グローバルの `--short` をコマンドより前に指定する。
+装飾、JSON のクォートや括弧、空値、レンダリング用 HTML、メールアドレスを除き、
+必要な情報だけを行指向のプレーンテキストで出力する。
+
+```console
+uv run ctfd --short challenges list
+uv run ctfd --short challenges show 12
+uv run ctfd --short me
 ```
 
 提出結果が正解または既に正解済みなら終了コード `0`、不正解などの競技上の失敗は

@@ -89,7 +89,7 @@ class User(CtfdModel):
     name: str
     email: str | None = None
     score: int | float = 0
-    place: int | None = None
+    place: int | str | None = None
     team_id: int | None = None
     oauth_id: str | int | None = None
     verified: bool | None = None

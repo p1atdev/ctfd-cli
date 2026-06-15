@@ -44,6 +44,7 @@ def test_list_challenges_sends_auth_and_filters() -> None:
 
     request = route.calls.last.request
     assert request.headers["Authorization"] == "Token secret-token"
+    assert request.headers["Content-Type"] == "application/json"
     assert dict(request.url.params) == {"category": "misc", "q": "Wel", "field": "name"}
     assert challenges[0].name == "Welcome"
     assert challenges[0].model_extra == {"plugin_field": "kept"}
@@ -54,13 +55,17 @@ def test_api_v1_url_is_not_duplicated() -> None:
         router.get(f"{API}/users/me").mock(
             return_value=httpx.Response(
                 200,
-                json={"success": True, "data": {"id": 7, "name": "alice"}},
+                json={
+                    "success": True,
+                    "data": {"id": 7, "name": "alice", "place": "17th"},
+                },
             )
         )
         with CtfdClient(f"{API}/", "token") as client:
             user = client.get_me()
 
     assert user.name == "alice"
+    assert user.place == "17th"
 
 
 def test_get_challenge_normalizes_file_urls_and_preserves_fields() -> None:
