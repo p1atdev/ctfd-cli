@@ -75,6 +75,7 @@ class CtfdClient:
             headers={
                 "Authorization": f"Token {token_value}",
                 "Accept": "application/json",
+                "Content-Type": "application/json",
                 "User-Agent": "ctfd-cli/0.1.0",
             },
             timeout=timeout,
