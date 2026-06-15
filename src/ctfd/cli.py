@@ -455,9 +455,9 @@ def scoreboard(
 def me(
     ctx: typer.Context,
     json_output: Annotated[bool, typer.Option("--json", help="Output JSON.")] = False,
-    hide_email: Annotated[
+    show_email: Annotated[
         bool,
-        typer.Option("--hide-email", help="Hide the email address from output."),
+        typer.Option("--show-email", help="Show the email address in output."),
     ] = False,
 ) -> None:
     """Show the current user's profile."""
@@ -469,21 +469,21 @@ def me(
     if _short_mode(ctx):
         _print_short_user(user)
     elif json_output:
-        if hide_email:
-            _print_json(user.model_dump(mode="json", exclude={"email"}))
-        else:
+        if show_email:
             _print_json(user)
+        else:
+            _print_json(user.model_dump(mode="json", exclude={"email"}))
     else:
-        _print_user(user, hide_email=hide_email)
+        _print_user(user, show_email=show_email)
 
 
-def _print_user(user: User, *, hide_email: bool = False) -> None:
+def _print_user(user: User, *, show_email: bool = False) -> None:
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
     table.add_row("ID", str(user.id))
     table.add_row("Name", user.name)
-    if user.email and not hide_email:
+    if user.email and show_email:
         table.add_row("Email", user.email)
     table.add_row("Score", str(user.score))
     if user.place is not None:

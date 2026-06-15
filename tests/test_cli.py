@@ -79,7 +79,7 @@ def test_token_is_not_printed_on_authentication_error(monkeypatch) -> None:
     assert token not in result.stderr
 
 
-def test_me_hide_email_omits_email_from_human_output(monkeypatch) -> None:
+def test_me_omits_email_from_human_output_by_default(monkeypatch) -> None:
     monkeypatch.setenv("CTFD_URL", "https://ctf.example")
     monkeypatch.setenv("CTFD_TOKEN", "token")
     with respx.mock(assert_all_called=True) as router:
@@ -96,7 +96,7 @@ def test_me_hide_email_omits_email_from_human_output(monkeypatch) -> None:
                 },
             )
         )
-        result = runner.invoke(app, ["me", "--hide-email"])
+        result = runner.invoke(app, ["me"])
 
     assert result.exit_code == 0
     assert "alice" in result.stdout
@@ -104,7 +104,7 @@ def test_me_hide_email_omits_email_from_human_output(monkeypatch) -> None:
     assert "Email" not in result.stdout
 
 
-def test_me_hide_email_omits_email_from_json(monkeypatch) -> None:
+def test_me_show_email_includes_email_in_human_output(monkeypatch) -> None:
     monkeypatch.setenv("CTFD_URL", "https://ctf.example")
     monkeypatch.setenv("CTFD_TOKEN", "token")
     with respx.mock(assert_all_called=True) as router:
@@ -121,11 +121,58 @@ def test_me_hide_email_omits_email_from_json(monkeypatch) -> None:
                 },
             )
         )
-        result = runner.invoke(app, ["me", "--json", "--hide-email"])
+        result = runner.invoke(app, ["me", "--show-email"])
+
+    assert result.exit_code == 0
+    assert "alice@example.com" in result.stdout
+    assert "Email" in result.stdout
+
+
+def test_me_omits_email_from_json_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("CTFD_URL", "https://ctf.example")
+    monkeypatch.setenv("CTFD_TOKEN", "token")
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{API}/users/me").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": 1,
+                        "name": "alice",
+                        "email": "alice@example.com",
+                    },
+                },
+            )
+        )
+        result = runner.invoke(app, ["me", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["name"] == "alice"
     assert "email" not in json.loads(result.stdout)
+
+
+def test_me_show_email_includes_email_in_json(monkeypatch) -> None:
+    monkeypatch.setenv("CTFD_URL", "https://ctf.example")
+    monkeypatch.setenv("CTFD_TOKEN", "token")
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{API}/users/me").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": 1,
+                        "name": "alice",
+                        "email": "alice@example.com",
+                    },
+                },
+            )
+        )
+        result = runner.invoke(app, ["me", "--json", "--show-email"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["email"] == "alice@example.com"
 
 
 def test_short_challenge_list_outputs_one_plain_text_line_per_challenge(monkeypatch) -> None:

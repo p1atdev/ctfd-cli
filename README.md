@@ -44,7 +44,7 @@ uv run ctfd challenges unlock-hint 4
 # スコアボードと自分の情報
 uv run ctfd scoreboard
 uv run ctfd me
-uv run ctfd me --hide-email
+uv run ctfd me --show-email
 uv run ctfd me solves
 uv run ctfd me submissions --challenge-id 12
 ```
