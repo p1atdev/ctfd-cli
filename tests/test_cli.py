@@ -4,9 +4,8 @@ import json
 
 import httpx
 import respx
-from typer.testing import CliRunner
-
 from ctfd.cli import EXIT_CONFIG, EXIT_OPERATION, app
+from typer.testing import CliRunner
 
 API = "https://ctf.example/api/v1"
 runner = CliRunner()
@@ -59,6 +58,131 @@ def test_missing_config_has_dedicated_exit_code(monkeypatch, tmp_path) -> None:
 
     assert result.exit_code == EXIT_CONFIG
     assert "Error:" in result.stderr
+
+
+def test_pull_creates_problem_markdown_and_downloads_files(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CTFD_URL", "https://ctf.example")
+    monkeypatch.setenv("CTFD_TOKEN", "token")
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{API}/challenges").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "id": 1,
+                            "type": "standard",
+                            "name": "The first problem",
+                            "category": "briefing",
+                            "value": 100,
+                        }
+                    ],
+                },
+            )
+        )
+        router.get(f"{API}/challenges/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": 1,
+                        "type": "standard",
+                        "name": "The first problem",
+                        "category": "briefing",
+                        "value": 100,
+                        "description": "Read this first.",
+                        "files": ["/files/task.txt?token=signed"],
+                        "hints": [{"id": 2, "cost": 0, "content": "Look closely."}],
+                    },
+                },
+            )
+        )
+        file_route = router.get("https://ctf.example/files/task.txt?token=signed").mock(
+            return_value=httpx.Response(200, content=b"task data")
+        )
+        result = runner.invoke(app, ["pull"])
+
+    challenge_dir = tmp_path / "challenges" / "briefing" / "01_The_first_problem"
+    problem = challenge_dir / "problem.md"
+    assert result.exit_code == 0
+    assert problem.read_text(encoding="utf-8") == (
+        "# The first problem\n"
+        "\n"
+        "- ID: 1\n"
+        "- Category: briefing\n"
+        "- Points: 100\n"
+        "- Solves: -\n"
+        "- Solved by me: no\n"
+        "\n"
+        "## Description\n"
+        "\n"
+        "Read this first.\n"
+        "\n"
+        "## Files\n"
+        "\n"
+        "- [task.txt](https://ctf.example/files/task.txt?token=signed)\n"
+        "\n"
+        "## Hints\n"
+        "\n"
+        "- Hint 2 (free): Look closely.\n"
+    )
+    assert (challenge_dir / "task.txt").read_bytes() == b"task data"
+    assert file_route.calls.last.request.headers["Authorization"] == "Token token"
+
+
+def test_pull_does_not_overwrite_existing_problem_or_files(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CTFD_URL", "https://ctf.example")
+    monkeypatch.setenv("CTFD_TOKEN", "token")
+    challenge_dir = tmp_path / "challenges" / "briefing" / "01_The_first_problem"
+    challenge_dir.mkdir(parents=True)
+    problem = challenge_dir / "problem.md"
+    attachment = challenge_dir / "task.txt"
+    problem.write_text("existing problem\n", encoding="utf-8")
+    attachment.write_bytes(b"existing data")
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{API}/challenges").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": [
+                        {
+                            "id": 1,
+                            "name": "The first problem",
+                            "category": "briefing",
+                            "value": 100,
+                        }
+                    ],
+                },
+            )
+        )
+        router.get(f"{API}/challenges/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "data": {
+                        "id": 1,
+                        "name": "The first problem",
+                        "category": "briefing",
+                        "value": 100,
+                        "description": "new problem",
+                        "files": ["/files/task.txt"],
+                    },
+                },
+            )
+        )
+        result = runner.invoke(app, ["pull"])
+
+    assert result.exit_code == 0
+    assert problem.read_text(encoding="utf-8") == "existing problem\n"
+    assert attachment.read_bytes() == b"existing data"
+    assert "1 skipped" in result.stdout
 
 
 def test_token_is_not_printed_on_authentication_error(monkeypatch) -> None:

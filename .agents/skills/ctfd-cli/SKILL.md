@@ -29,6 +29,7 @@ Use `--short` before the command for concise, agent-readable output:
 ```console
 /path/to/skill/scripts/ctfd.sh --short challenges list
 /path/to/skill/scripts/ctfd.sh --short challenges show 12
+/path/to/skill/scripts/ctfd.sh --short pull
 /path/to/skill/scripts/ctfd.sh --short scoreboard
 /path/to/skill/scripts/ctfd.sh --short me
 /path/to/skill/scripts/ctfd.sh --short me solves
@@ -40,6 +41,7 @@ Use `--json` instead of `--short` when structured output is required:
 ```console
 /path/to/skill/scripts/ctfd.sh challenges list --json
 /path/to/skill/scripts/ctfd.sh challenges show 12 --json
+/path/to/skill/scripts/ctfd.sh pull --json
 /path/to/skill/scripts/ctfd.sh me submissions --json
 ```
 

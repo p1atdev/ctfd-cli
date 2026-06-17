@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import wraps
+from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import unquote, urlsplit
 
 import typer
 from pydantic import BaseModel
@@ -60,6 +63,32 @@ class CliOptions:
     token: str | None
     timeout: float | None
     short: bool
+
+
+@dataclass
+class PullStats:
+    challenges: int = 0
+    problem_created: int = 0
+    problem_skipped: int = 0
+    files_downloaded: int = 0
+    files_skipped: int = 0
+
+    def as_dict(self, output_dir: Path) -> dict[str, Any]:
+        return {
+            "output_dir": str(output_dir),
+            "challenges": self.challenges,
+            "problem_files": {
+                "created": self.problem_created,
+                "skipped": self.problem_skipped,
+            },
+            "attachments": {
+                "downloaded": self.files_downloaded,
+                "skipped": self.files_skipped,
+            },
+        }
+
+
+_SAFE_PATH_PART_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
@@ -231,6 +260,140 @@ def _print_short_submissions(submissions: list[Submission]) -> None:
         )
 
 
+def _safe_path_part(value: object | None, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    text = _SAFE_PATH_PART_RE.sub("_", text)
+    text = text.strip("._-")
+    return text or fallback
+
+
+def _challenge_dir_name(challenge: ChallengeDetail) -> str:
+    name = _safe_path_part(challenge.name, fallback=f"challenge_{challenge.id}")
+    return f"{challenge.id:02d}_{name}"
+
+
+def _file_name_from_url(file_url: str, index: int) -> str:
+    raw_name = Path(unquote(urlsplit(file_url).path)).name
+    return _safe_path_part(raw_name, fallback=f"file_{index}")
+
+
+def _planned_file_names(file_urls: Sequence[str]) -> list[tuple[str, str]]:
+    used: set[str] = set()
+    planned: list[tuple[str, str]] = []
+    for index, file_url in enumerate(file_urls, start=1):
+        name = _file_name_from_url(file_url, index)
+        candidate = name
+        suffix = 2
+        while candidate in used:
+            path = Path(name)
+            candidate = f"{path.stem}_{suffix}{path.suffix}"
+            suffix += 1
+        used.add(candidate)
+        planned.append((file_url, candidate))
+    return planned
+
+
+def _ensure_directory(path: Path) -> None:
+    if path.exists() and not path.is_dir():
+        raise CtfdConfigError(f"{path} exists and is not a directory")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise CtfdConfigError(f"could not create {path}: {exc}") from exc
+
+
+def _write_text_if_missing(path: Path, content: str) -> bool:
+    if path.exists():
+        return False
+    try:
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise CtfdConfigError(f"could not write {path}: {exc}") from exc
+    return True
+
+
+def _write_bytes_if_missing(path: Path, content: bytes) -> bool:
+    if path.exists():
+        return False
+    try:
+        path.write_bytes(content)
+    except OSError as exc:
+        raise CtfdConfigError(f"could not write {path}: {exc}") from exc
+    return True
+
+
+def _render_problem_markdown(
+    challenge: ChallengeDetail,
+    files: Sequence[tuple[str, str]],
+) -> str:
+    lines = [
+        f"# {challenge.name}",
+        "",
+        f"- ID: {challenge.id}",
+        f"- Category: {challenge.category or '-'}",
+        f"- Points: {challenge.value}",
+        f"- Solves: {challenge.solves if challenge.solves is not None else '-'}",
+        f"- Solved by me: {'yes' if challenge.solved_by_me else 'no'}",
+    ]
+    if challenge.connection_info:
+        lines.append(f"- Connection: {challenge.connection_info}")
+    if challenge.max_attempts:
+        attempts = challenge.attempts if challenge.attempts is not None else 0
+        lines.append(f"- Attempts: {attempts}/{challenge.max_attempts}")
+
+    if challenge.description:
+        lines.extend(["", "## Description", "", challenge.description.strip()])
+
+    if files:
+        lines.extend(["", "## Files", ""])
+        for file_url, file_name in files:
+            lines.append(f"- [{file_name}]({file_url})")
+
+    if challenge.hints:
+        lines.extend(["", "## Hints", ""])
+        for hint in challenge.hints:
+            cost = "free" if hint.cost == 0 else f"{hint.cost} points"
+            title = f" - {hint.title}" if hint.title else ""
+            state = _inline(hint.content) if hint.content else "locked"
+            lines.append(f"- Hint {hint.id}{title} ({cost}): {state}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _pull_challenge(
+    client: CtfdClient,
+    challenge: ChallengeDetail,
+    output_dir: Path,
+    *,
+    include_files: bool,
+    stats: PullStats,
+) -> None:
+    stats.challenges += 1
+    category = _safe_path_part(challenge.category, fallback="uncategorized")
+    challenge_dir = output_dir / category / _challenge_dir_name(challenge)
+    _ensure_directory(challenge_dir)
+
+    files = _planned_file_names(challenge.files)
+    problem_path = challenge_dir / "problem.md"
+    if _write_text_if_missing(problem_path, _render_problem_markdown(challenge, files)):
+        stats.problem_created += 1
+    else:
+        stats.problem_skipped += 1
+
+    if not include_files:
+        return
+
+    for file_url, file_name in files:
+        target_path = challenge_dir / file_name
+        if target_path.exists():
+            stats.files_skipped += 1
+            continue
+        if _write_bytes_if_missing(target_path, client.download_file(file_url)):
+            stats.files_downloaded += 1
+        else:
+            stats.files_skipped += 1
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -257,6 +420,84 @@ def main(
     """Load global connection options."""
 
     ctx.obj = CliOptions(url=url, token=token, timeout=timeout, short=short)
+
+
+@app.command("pull")
+@_handle_errors
+def pull(
+    ctx: typer.Context,
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            "-o",
+            file_okay=False,
+            dir_okay=True,
+            help="Directory to write downloaded challenges into.",
+        ),
+    ] = Path("challenges"),
+    category: Annotated[str | None, typer.Option(help="Filter by category.")] = None,
+    challenge_type: Annotated[
+        str | None,
+        typer.Option("--type", help="Filter by challenge type."),
+    ] = None,
+    state: Annotated[str | None, typer.Option(help="Filter by state.")] = None,
+    query: Annotated[str | None, typer.Option("--search", "-s", help="Search value.")] = None,
+    field: Annotated[
+        str | None,
+        typer.Option(help="Field used by --search, such as name or category."),
+    ] = None,
+    include_files: Annotated[
+        bool,
+        typer.Option("--files/--no-files", help="Download challenge attachments."),
+    ] = True,
+    json_output: Annotated[bool, typer.Option("--json", help="Output JSON summary.")] = False,
+) -> None:
+    """Download visible challenges into local files without overwriting existing files."""
+
+    _ensure_directory(output_dir)
+    stats = PullStats()
+    with _client(ctx) as client:
+        challenges = client.list_challenges(
+            category=category,
+            challenge_type=challenge_type,
+            state=state,
+            query=query,
+            field=field,
+        )
+        for challenge in challenges:
+            detail = client.get_challenge(challenge.id)
+            _pull_challenge(
+                client,
+                detail,
+                output_dir,
+                include_files=include_files,
+                stats=stats,
+            )
+
+    if _short_mode(ctx):
+        typer.echo(
+            _short_line(
+                f"challenges={stats.challenges}",
+                f"problem_created={stats.problem_created}",
+                f"problem_skipped={stats.problem_skipped}",
+                f"files_downloaded={stats.files_downloaded}",
+                f"files_skipped={stats.files_skipped}",
+            )
+        )
+        return
+    if json_output:
+        _print_json(stats.as_dict(output_dir))
+        return
+
+    console.print(
+        "Pulled "
+        f"{stats.challenges} challenges into {output_dir} "
+        f"({stats.problem_created} problem files created, "
+        f"{stats.problem_skipped} skipped; "
+        f"{stats.files_downloaded} attachments downloaded, "
+        f"{stats.files_skipped} skipped)."
+    )
 
 
 @challenges_app.command("list")

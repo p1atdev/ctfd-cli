@@ -67,6 +67,7 @@ class CtfdClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.site_url, self.api_url = _normalize_urls(url)
+        self._timeout = timeout
         token_value = token.get_secret_value() if isinstance(token, SecretStr) else token
         if not token_value:
             raise ValueError("token must not be empty")
@@ -163,8 +164,53 @@ class CtfdClient:
         )
         return self._parse_list(Submission, data)
 
+    def download_file(self, file_url: str) -> bytes:
+        try:
+            if self._is_same_site_url(file_url):
+                response = self._http.get(file_url, follow_redirects=True)
+            else:
+                response = httpx.get(
+                    file_url,
+                    headers={"User-Agent": "ctfd-cli/0.1.0"},
+                    timeout=self._timeout,
+                    follow_redirects=True,
+                )
+        except httpx.TimeoutException as exc:
+            raise CtfdTimeoutError("request to CTFd timed out") from exc
+        except httpx.RequestError as exc:
+            raise CtfdConnectionError("could not connect to the CTFd server") from exc
+
+        if response.is_error:
+            errors: Any = None
+            try:
+                payload = response.json()
+            except ValueError:
+                message = f"CTFd returned HTTP {response.status_code} while downloading file"
+            else:
+                if isinstance(payload, dict):
+                    errors = payload.get("errors") or payload.get("message")
+                message = (
+                    _format_errors(errors)
+                    if errors
+                    else f"CTFd returned HTTP {response.status_code} while downloading file"
+                )
+            self._raise_api_error(
+                message,
+                status_code=response.status_code,
+                errors=errors,
+                retry_after=response.headers.get("Retry-After"),
+            )
+        return response.content
+
     def absolute_url(self, value: str) -> str:
         return urljoin(f"{self.site_url}/", value)
+
+    def _is_same_site_url(self, value: str) -> bool:
+        parsed = urlsplit(value)
+        if not parsed.netloc:
+            return True
+        site = urlsplit(self.site_url)
+        return parsed.scheme == site.scheme and parsed.netloc == site.netloc
 
     def _request(
         self,

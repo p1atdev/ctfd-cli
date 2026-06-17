@@ -41,6 +41,9 @@ uv run ctfd challenges list
 # 問題詳細（添付ファイル URL とヒントを含む）
 uv run ctfd challenges show 12
 
+# 問題を ./challenges に保存（既存ファイルは上書きしない）
+uv run ctfd pull
+
 # フラグ提出
 uv run ctfd challenges submit 12 'flag{example}'
 
@@ -69,6 +72,7 @@ AI エージェントから利用する場合は、グローバルの `--short` 
 ```console
 uv run ctfd --short challenges list
 uv run ctfd --short challenges show 12
+uv run ctfd --short pull
 uv run ctfd --short me
 ```
 
